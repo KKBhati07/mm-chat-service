@@ -12,6 +12,9 @@ export const databaseConfig = (
   database: configService.get<string>('DB_NAME'),
 
   autoLoadEntities: true,
-  synchronize: false, // VERY IMPORTANT
+  synchronize: false, // to not sync schema automatically
   logging: ['error'],
+
+  migrations: ['dist/migrations/*.js'], // to compare pending migrations at runtime
+  migrationsTableName: 'typeorm_migrations', // table for migration matadata
 });
