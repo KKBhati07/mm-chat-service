@@ -1,98 +1,156 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# MMChatService
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+MMChatService is a **real-time chat engine** built for the **MarketMate** platform. It is designed as a **separate
+backend service** focused purely on real-time messaging, scalability, and clean separation of concerns.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+The service uses **NestJS + Socket.IO**, integrates with **Spring Boot authentication**, and relies on **Redis and
+PostgreSQL** for performance and persistence.
 
-## Description
+---
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 🧠 Why a Separate Chat Service?
 
-## Project setup
+* Real-time workloads behave very differently from REST APIs
+* WebSockets require long-lived connections
+* Easier horizontal scaling
+* Cleaner architecture (auth, chat, core backend separated)
 
-```bash
-$ npm install
+MMChatService is **not a REST API**. It is a **socket-first service**.
+
+---
+
+## 🧱 Tech Stack
+
+* **Node.js** 22
+* **NestJS** (WebSocket Gateway)
+* **Socket.IO** (real-time communication)
+* **PostgreSQL** (chat persistence)
+* **Redis** (session validation + caching)
+* **Docker / Docker Compose** (local & prod setup)
+
+---
+
+## 🔐 Authentication Model
+
+Authentication is **delegated to the Spring Boot backend**.
+
+### High-level flow
+
+1. User logs in via Spring Boot
+2. Spring Boot:
+
+    * Creates a session
+    * Stores session + user info in Redis
+    * Issues a JWT (httpOnly cookie) containing `sessionId`
+3. Browser connects to MMChatService via Socket.IO
+4. MMChatService:
+
+    * Reads JWT from httpOnly cookie
+    * Verifies JWT signature
+    * Extracts `sessionId`
+    * Checks Redis for session existence
+    * Reads `userUuid` from Redis (cache-first)
+    * Falls back to Spring Boot only on cache miss
+
+> Redis is treated as a **cache**, Spring Boot remains the **source of truth**.
+
+---
+
+## 🔌 WebSocket API
+
+### Connect
+
+* Uses httpOnly cookie automatically
+* No token handling in frontend
+
+```ts
+io(CHAT_WS_URL, {
+  withCredentials: true
+});
 ```
 
-## Compile and run the project
+---
 
-```bash
-# development
-$ npm run start
+### Join Conversation
 
-# watch mode
-$ npm run start:dev
+**Event**: `join_conversation`
 
-# production mode
-$ npm run start:prod
+```json
+{
+  "otherUserUuid": "uuid"
+}
 ```
 
-## Run tests
+**Response**:
 
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+```json
+{
+  "conversationId": "uuid"
+}
 ```
 
-## Deployment
+---
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+### Send Message
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+**Event**: `send_message`
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+```json
+{
+  "conversationId": "uuid",
+  "content": "Hello"
+}
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+---
 
-## Resources
+### Receive Message
 
-Check out a few resources that may come in handy when working with NestJS:
+**Event**: `new_message`
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+```json
+{
+  "id": "uuid",
+  "conversationId": "uuid",
+  "senderUuid": "uuid",
+  "content": "Hello",
+  "createdAt": "timestamp"
+}
+```
 
-## Support
+---
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+## 🐳 Docker (Local Development)
 
-## Stay in touch
+### Dockerfile
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+* Node 22 (slim)
+* Hot reload
+* Volume-mounted source
 
-## License
+### docker-compose service
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+```yaml
+chat-engine:
+  build:
+    context: ./mm-chat-service
+    dockerfile: DOCKERFILE.local
+  ports:
+    - "3100:3000"
+  volumes:
+    - ./mm-chat-service:/app
+    - chat_engine_node_modules:/app/node_modules
+  environment:
+    - NODE_ENV=development
+```
+
+---
+
+## 🚀 Design Principles
+
+* Socket-first (no REST controllers)
+* Stateless chat engine
+* Redis-first, backend-authoritative auth
+* Strong separation of concerns
+* Docker-native
+* Production-ready logging

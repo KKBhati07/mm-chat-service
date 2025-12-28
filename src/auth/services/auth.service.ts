@@ -1,0 +1,135 @@
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import Redis from 'ioredis';
+import { REDIS_CLIENT } from '../../redis/redis.provider';
+import { AppLogger } from '../../core/logger/app.logger';
+
+@Injectable()
+export class AuthService {
+  private readonly SESSION_PREFIX = 'auth:session:';
+
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+    private readonly logger: AppLogger,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+  ) {
+    this.logger.setContext(AuthService.name);
+  }
+
+  /**
+   * Verifies a JWT token and extracts the sessionId from its payload.
+   *
+   * @param token - Raw JWT token (usually from Authorization header)
+   * @returns Object containing the resolved sessionId
+   * @throws UnauthorizedException if token is invalid or sessionId is missing
+   */
+  verifyJwt(token: string): { sessionId: string } {
+    try {
+      const payload = this.jwtService.verify(token);
+      if (!payload?.sessionId) {
+        this.logger.warn('JWT verified but sessionId missing');
+        throw new UnauthorizedException();
+      }
+      this.logger.debug('JWT verified successfully');
+      return { sessionId: payload.sessionId };
+    } catch {
+      this.logger.warn('JWT verification failed');
+      throw new UnauthorizedException('Invalid JWT');
+    }
+  }
+
+  /**
+   * Resolves the user UUID for a given sessionId.
+   *
+   * Resolution strategy:
+   * 1. Try Redis cache (fast path)
+   * 2. Fallback to Spring Auth service if cache miss or invalid data
+   *
+   * @param sessionId - Session identifier extracted from JWT
+   * @returns User UUID associated with the session
+   * @throws UnauthorizedException if session is invalid
+   */
+  async resolveUserUuid(sessionId: string): Promise<string> {
+    const key = `${this.SESSION_PREFIX}${sessionId}`;
+
+    const exists = await this.redis.exists(key);
+    if (!exists) {
+      this.logger.debug('Session not found in Redis, falling back to Spring');
+      return this.resolveViaSpring(sessionId);
+    }
+
+    const raw = await this.redis.get(key);
+    if (!raw) {
+      this.logger.debug('Redis session value empty, falling back to Spring');
+      return this.resolveViaSpring(sessionId);
+    }
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed?.userUuid) {
+        this.logger.debug(
+          'userUuid missing in Redis payload, falling back to Spring',
+        );
+        return this.resolveViaSpring(sessionId);
+      }
+      this.logger.debug('Resolved userUuid from Redis cache');
+      return parsed.userUuid;
+    } catch {
+      this.logger.warn(
+        'Failed to parse Redis session payload, falling back to Spring',
+      );
+      return this.resolveViaSpring(sessionId);
+    }
+  }
+
+  /**
+   * Resolves session details via Spring Auth service.
+   *
+   * Used as a fallback when:
+   * - Redis cache miss
+   * - Corrupted cache entry
+   * - Missing userUuid in cache
+   *
+   * Includes a timeout safeguard to prevent hanging requests.
+   *
+   * @param sessionId - Session identifier to resolve
+   * @returns User UUID returned by Spring Auth service
+   * @throws UnauthorizedException if session is invalid or service fails
+   */
+  private async resolveViaSpring(sessionId: string): Promise<string> {
+    this.logger.debug('Calling Spring Auth service to resolve session');
+
+    const url = this.configService.get<string>('AUTH_RESOLVE_URL')!;
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      });
+
+      if (!res.ok) {
+        this.logger.warn('Spring Auth service rejected session');
+        throw new UnauthorizedException();
+      }
+
+      const data = await res.json();
+
+      if (!data?.userUuid) {
+        this.logger.warn('Spring response missing userUuid');
+        throw new UnauthorizedException();
+      }
+
+      this.logger.log('Resolved userUuid via Spring fallback');
+      return data.userUuid;
+    } catch (err) {
+      this.logger.error('Spring Auth fallback failed', err?.stack);
+      throw new UnauthorizedException('Session invalid');
+    }
+  }
+}
