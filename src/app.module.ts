@@ -1,10 +1,13 @@
-import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { databaseConfig } from './config/database.config';
 import { envValidationSchema } from './config/env.validation';
+import { RedisModule } from './redis/redis.module';
+import { ChatModule } from './chat/chat.module';
+import { AuthModule } from './auth/auth.module';
+import { HttpContextMiddleware } from './core/context/http-context.middleware';
+import { CoreModule } from './core/core.module';
 
 @Module({
   imports: [
@@ -17,8 +20,14 @@ import { envValidationSchema } from './config/env.validation';
       inject: [ConfigService],
       useFactory: databaseConfig,
     }),
+    RedisModule,
+    ChatModule,
+    AuthModule,
+    CoreModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(HttpContextMiddleware).forRoutes('*');
+  }
+}

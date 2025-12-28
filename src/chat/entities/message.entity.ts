@@ -7,12 +7,11 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { Conversation } from './conversation.entity';
-import { UUID } from 'crypto';
 
 @Entity('messages')
 export class Message {
   @PrimaryGeneratedColumn('uuid')
-  id: UUID;
+  id?: string;
 
   @Column({ name: 'conversation_id', type: 'uuid' })
   conversationId: string;
@@ -21,10 +20,10 @@ export class Message {
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'conversation_id' })
-  conversation: Conversation;
+  conversation?: Conversation;
 
-  @Column({ name: 'sender_uuid', type: 'uuid' })
-  senderId: UUID;
+  @Column({ name: 'sender_id', type: 'uuid' })
+  senderId: string;
 
   @Column({ type: 'text' })
   content: string;

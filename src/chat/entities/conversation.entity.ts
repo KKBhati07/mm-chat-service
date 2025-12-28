@@ -7,19 +7,18 @@ import {
   Index,
 } from 'typeorm';
 import { Message } from './message.entity';
-import { UUID } from 'crypto';
 
 @Entity('conversations')
 @Index(['userOneId', 'userTwoId'], { unique: true })
 export class Conversation {
   @PrimaryGeneratedColumn('uuid')
-  id: UUID;
+  id: string;
 
   @Column({ name: 'user_one_id', type: 'uuid' })
-  userOneId: UUID;
+  userOneId: string;
 
   @Column({ name: 'user_two_id', type: 'uuid' })
-  userTwoId: UUID;
+  userTwoId: string;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
