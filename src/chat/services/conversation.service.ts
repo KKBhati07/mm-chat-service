@@ -46,4 +46,10 @@ export class ConversationService {
 
     return this.conversationRepository.save(conversation);
   }
+
+  async findById(conversationId: string): Promise<Conversation | null> {
+    return this.conversationRepository.findOne({
+      where: { id: conversationId },
+    });
+  }
 }
