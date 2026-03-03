@@ -134,7 +134,6 @@ export class AuthService {
 
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 10000);
-    console.warn('Url =>', url);
 
     try {
       const res = await fetch(url, {
