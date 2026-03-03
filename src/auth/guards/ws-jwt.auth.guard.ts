@@ -29,10 +29,27 @@ export class WsJwtGuard implements CanActivate {
       this.contextService.run(async () => {
         try {
           // Basic WS context
-          this.contextService.set(APP_CONSTANTS.REQUEST_CONTEXT.SOCKET_ID, randomUUID());
+          this.contextService.set(
+            APP_CONSTANTS.REQUEST_CONTEXT.SOCKET_ID,
+            client?.id ?? randomUUID(),
+          );
           this.contextService.set('transport', APP_CONSTANTS.TRANSPORT.WEBSOCKET );
 
-          this.logger.debug('Starting socket authentication');
+          // If handshake middleware already authenticated this socket, trust it.
+          if (client.data?.sessionId && client.data?.userUuid) {
+            this.contextService.set(
+              APP_CONSTANTS.REQUEST_CONTEXT.SESSION_ID,
+              client.data.sessionId,
+            );
+            this.contextService.set(
+              APP_CONSTANTS.REQUEST_CONTEXT.USER_UUID,
+              client.data.userUuid,
+            );
+            resolve(true);
+            return;
+          }
+
+          this.logger.debug('Starting socket authentication (guard)');
 
           // Auth flow
           const cookieHeader = client.handshake.headers.cookie;
@@ -58,7 +75,9 @@ export class WsJwtGuard implements CanActivate {
           resolve(true);
         } catch (err) {
           this.logger.warn('Socket authentication failed');
-          throw new UnauthorizedException();
+          client.emit('auth_error', 'Unauthorized');
+          client.disconnect();
+          resolve(false);
         }
       });
     });

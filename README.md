@@ -120,6 +120,17 @@ io(CHAT_WS_URL, {
 
 ---
 
+## ⚙️ Configuration
+
+| Variable | Description | Default (in code) |
+|----------|-------------|-------------------|
+| `PORT` | HTTP(S) server port | `4400` |
+| `ALLOWED_APP_ORIGINS` | Comma-separated CORS origins for Socket.IO / HTTP | `https://marketmate.local:4200`, `https://admin.marketmate.local:4300`, `http://localhost:4200`, `http://localhost:4300` |
+
+The service runs over **HTTPS**. Certificate paths are set in code (`/certs/`). For local development, see `certs/README.md`.
+
+---
+
 ## 🐳 Docker (Local Development)
 
 ### Dockerfile

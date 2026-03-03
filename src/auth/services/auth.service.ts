@@ -1,4 +1,9 @@
-import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  InternalServerErrorException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
@@ -28,12 +33,13 @@ export class AuthService {
   verifyJwt(token: string): { sessionId: string } {
     try {
       const payload = this.jwtService.verify(token);
-      if (!payload?.sessionId) {
+      const sessionId = payload?.sessionId ?? payload?.sub;
+      if (!sessionId) {
         this.logger.warn('JWT verified but sessionId missing');
         throw new UnauthorizedException();
       }
       this.logger.debug('JWT verified successfully');
-      return { sessionId: payload.sessionId };
+      return { sessionId };
     } catch {
       this.logger.warn('JWT verification failed');
       throw new UnauthorizedException('Invalid JWT');
@@ -85,7 +91,7 @@ export class AuthService {
   }
 
   /**
-   * Resolves session details via Spring Auth service.
+   * Resolves session details via Spring Auth service internal endpoint.
    *
    * Used as a fallback when:
    * - Redis cache miss
@@ -99,17 +105,44 @@ export class AuthService {
    * @throws UnauthorizedException if session is invalid or service fails
    */
   private async resolveViaSpring(sessionId: string): Promise<string> {
-    this.logger.debug('Calling Spring Auth service to resolve session');
+    this.logger.debug(
+      'Calling Spring Auth service internal endpoint to resolve session',
+    );
 
-    const url = this.configService.get<string>('AUTH_RESOLVE_URL')!;
+    // Construct URL from Spring base URL + internal endpoint path
+    const url =
+      this.configService.get<string>('SPRING_BASE_URL') ||
+      this.configService.get<string>('AUTH_RESOLVE_URL');
+
+    if (!url){
+      this.logger.error('Unable to Authenticate. Auth Url not found!');
+      throw new InternalServerErrorException(
+        'Unable to Authenticate. Auth Url not found!',
+      );
+    }
+
+    // Get service key for internal endpoint authentication
+    const serviceKey =
+      this.configService.get<string>('SPRING_INTERNAL_SERVICE_KEY') ||
+      this.configService.get<string>('INTERNAL_SERVICE_KEY') ||
+      '6911aa62-3705-42ef-8484-db35b62cf9ba';
+
+    if (!serviceKey) {
+      this.logger.error('Internal service key not configured');
+      throw new UnauthorizedException('Service configuration error');
+    }
+
     const controller = new AbortController();
-    setTimeout(() => controller.abort(), 3000);
+    setTimeout(() => controller.abort(), 10000);
 
     try {
       const res = await fetch(url, {
         method: 'POST',
         signal: controller.signal,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-SERVICE-KEY': serviceKey,
+        },
         body: JSON.stringify({ sessionId }),
       });
 
@@ -118,15 +151,15 @@ export class AuthService {
         throw new UnauthorizedException();
       }
 
-      const data = await res.json();
+      const response = await res.json();
 
-      if (!data?.userUuid) {
+      if (!response?.data?.userUuid) {
         this.logger.warn('Spring response missing userUuid');
         throw new UnauthorizedException();
       }
 
       this.logger.log('Resolved userUuid via Spring fallback');
-      return data.userUuid;
+      return response.data.userUuid;
     } catch (err) {
       this.logger.error('Spring Auth fallback failed', err?.stack);
       throw new UnauthorizedException('Session invalid');
