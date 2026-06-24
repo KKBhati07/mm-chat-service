@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { AppLogger } from './core/logger/app.logger';
 import * as fs from 'fs';
@@ -13,23 +14,20 @@ async function bootstrap() {
     httpsOptions,
   });
 
+  const configService = app.get(ConfigService);
   const logger = app.get(AppLogger);
   logger.setContext('Bootstrap');
 
-  // Enable CORS globally for HTTP requests
-  const allowedOrigins = process.env.ALLOWED_APP_ORIGINS?.split(',') ?? [
-    'https://marketmate.local:4200',
-    'https://admin.marketmate.local:4300',
-    'http://localhost:4200',
-    'http://localhost:4300'
-  ];
+  const allowedOrigins = configService
+    .get<string>('ALLOWED_APP_ORIGINS')!
+    .split(',');
 
   app.enableCors({
     origin: allowedOrigins,
     credentials: true,
   });
 
-  const port = process.env.PORT ?? 4400;
+  const port = configService.get<number>('PORT')!;
   await app.listen(port);
   logger.log(`Chat service listening on port ${port}`);
   logger.log(`Allowed origins: ${allowedOrigins.join(', ')}`);

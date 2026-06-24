@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Message } from '../entities/message.entity';
-import { UUID } from 'crypto';
 
 @Injectable()
 export class MessageService {
@@ -25,14 +24,28 @@ export class MessageService {
 
   async getMessagesByConversation(
     conversationId: string,
-    limit = 20,
+    limit = 50,
     offset = 0,
   ): Promise<Message[]> {
     return this.messageRepository.find({
       where: { conversationId },
-      order: { createdAt: 'DESC' },
+      order: { createdAt: 'ASC' },
       take: limit,
       skip: offset,
     });
+  }
+
+  async getLatestByConversationIds(ids: string[]): Promise<Message[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    return this.messageRepository
+      .createQueryBuilder('message')
+      .distinctOn(['message.conversationId'])
+      .where('message.conversationId IN (:...ids)', { ids })
+      .orderBy('message.conversationId', 'ASC')
+      .addOrderBy('message.createdAt', 'DESC')
+      .getMany();
   }
 }

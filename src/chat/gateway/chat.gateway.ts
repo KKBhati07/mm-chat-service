@@ -16,15 +16,13 @@ import { WsJwtGuard } from '../../auth/guards/ws-jwt.auth.guard';
 import { AppLogger } from '../../core/logger/app.logger';
 import { AuthService } from '../../auth/services/auth.service';
 import { getCookieValue } from '../../auth/cookie.util';
+import { DEFAULT_ALLOWED_APP_ORIGINS } from '../../config/env.validation';
 
 @WebSocketGateway({
   cors: {
-    origin: process.env.ALLOWED_APP_ORIGINS?.split(',') ?? [
-      'https://marketmate.local:4200',
-      'https://admin.marketmate.local:4300',
-      'http://localhost:4200',
-      'http://localhost:4300'
-    ],
+    origin:
+      process.env.ALLOWED_APP_ORIGINS?.split(',') ??
+      DEFAULT_ALLOWED_APP_ORIGINS.split(','),
     credentials: true,
   },
 })
@@ -130,25 +128,25 @@ export class ChatGateway
       `Join conversation by ID requested conversationId=${conversationId}`,
     );
 
-    // Verify user is part of this conversation
     const conversation = await this.conversationService.findById(conversationId);
-    
+
     if (!conversation) {
       this.logger.warn(
         `Conversation not found conversationId=${conversationId}`,
       );
-      throw new Error('Conversation not found');
+      return this.wsError('CONVERSATION_NOT_FOUND', 'Conversation not found');
     }
 
-    // Verify the user is a participant
     if (
-      conversation.userOneId !== currentUserUuid &&
-      conversation.userTwoId !== currentUserUuid
+      !this.conversationService.isParticipant(conversation, currentUserUuid)
     ) {
       this.logger.warn(
         `User ${currentUserUuid} is not a participant in conversation ${conversationId}`,
       );
-      throw new Error('Unauthorized: Not a participant in this conversation');
+      return this.wsError(
+        'NOT_PARTICIPANT',
+        'You are not a participant in this conversation',
+      );
     }
 
     const roomName = this.getRoomName(conversationId);
@@ -174,28 +172,45 @@ export class ChatGateway
       `Sending message in conversation=${conversationId}`,
     );
 
+    const conversation =
+      await this.conversationService.findById(conversationId);
+
+    if (!conversation) {
+      this.logger.warn(
+        `Conversation not found conversationId=${conversationId}`,
+      );
+      return this.wsError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+    }
+
+    if (!this.conversationService.isParticipant(conversation, senderUuid)) {
+      this.logger.warn(
+        `User ${senderUuid} is not a participant in conversation ${conversationId}`,
+      );
+      return this.wsError(
+        'NOT_PARTICIPANT',
+        'You are not a participant in this conversation',
+      );
+    }
+
     const message = await this.messageService.saveMessage(
       conversationId,
       senderUuid,
       payload.content,
     );
 
-    // Get receiver UUID from conversation
-    const receiverUuid = await this.getReceiverUuid(
-      conversationId,
+    const receiverUuid = this.conversationService.getOtherParticipant(
+      conversation,
       senderUuid,
     );
 
     const conversationRoomName = this.getRoomName(conversationId);
     const receiverPersonalRoom = this.getPersonalRoomName(receiverUuid);
 
-    const messagePayload = {
-      id: message.id,
+    const messagePayload = this.toMessagePayload(
+      message,
       conversationId,
       senderUuid,
-      content: message.content,
-      createdAt: message.createdAt,
-    };
+    );
 
     this.logger.log(
       `[MESSAGE SENT] messageId=${message.id} conversationId=${conversationId} senderUuid=${senderUuid} receiverUuid=${receiverUuid} content="${message.content.substring(0, 50)}${message.content.length > 50 ? '...' : ''}"`,
@@ -231,13 +246,108 @@ export class ChatGateway
 
     return {
       success: true,
-      message: {
-        id: message.id,
-        conversationId,
-        senderUuid,
-        content: message.content,
-        createdAt: message.createdAt,
-      },
+      message: this.toMessagePayload(message, conversationId, senderUuid),
+    };
+  }
+
+  @SubscribeMessage('get_messages')
+  async handleGetMessages(
+    @MessageBody()
+    payload: { conversationId: string; limit?: number; offset?: number },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const { conversationId } = payload;
+    const currentUserUuid = client.data.userUuid;
+    const limit = payload.limit ?? 50;
+    const offset = payload.offset ?? 0;
+
+    this.logger.debug(
+      `Get messages requested conversationId=${conversationId} limit=${limit} offset=${offset}`,
+    );
+
+    const conversation =
+      await this.conversationService.findById(conversationId);
+
+    if (!conversation) {
+      this.logger.warn(
+        `Conversation not found conversationId=${conversationId}`,
+      );
+      return this.wsError('CONVERSATION_NOT_FOUND', 'Conversation not found');
+    }
+
+    if (
+      !this.conversationService.isParticipant(conversation, currentUserUuid)
+    ) {
+      this.logger.warn(
+        `User ${currentUserUuid} is not a participant in conversation ${conversationId}`,
+      );
+      return this.wsError(
+        'NOT_PARTICIPANT',
+        'You are not a participant in this conversation',
+      );
+    }
+
+    const messages = await this.messageService.getMessagesByConversation(
+      conversationId,
+      limit,
+      offset,
+    );
+
+    return {
+      success: true,
+      messages: messages.map((message) =>
+        this.toMessagePayload(message, conversationId, message.senderId),
+      ),
+    };
+  }
+
+  @SubscribeMessage('list_conversations')
+  async handleListConversations(@ConnectedSocket() client: Socket) {
+    const userUuid = client.data.userUuid;
+
+    if (!userUuid) {
+      return this.wsError('UNAUTHORIZED', 'Not authenticated');
+    }
+
+    this.logger.debug(`List conversations requested userUuid=${userUuid}`);
+
+    try {
+      const conversations =
+        await this.conversationService.listForUser(userUuid);
+
+      return {
+        success: true,
+        conversations: conversations.map((item) => ({
+          conversationId: item.conversationId,
+          otherParticipantUuid: item.otherParticipantUuid,
+          participants: item.participants,
+          createdAt: item.createdAt,
+          lastMessage: item.lastMessage
+            ? this.toMessagePayload(
+                item.lastMessage,
+                item.conversationId,
+                item.lastMessage.senderUuid,
+              )
+            : null,
+        })),
+      };
+    } catch (err) {
+      this.logger.error('Failed to list conversations', err?.stack);
+      return this.wsError('INTERNAL_ERROR', 'Failed to load conversations');
+    }
+  }
+
+  private toMessagePayload(
+    message: { id?: string; content: string; createdAt: Date },
+    conversationId: string,
+    senderUuid: string,
+  ) {
+    return {
+      id: message.id,
+      conversationId,
+      senderUuid,
+      content: message.content,
+      createdAt: message.createdAt,
     };
   }
 
@@ -249,25 +359,7 @@ export class ChatGateway
     return `user:${userUuid}`;
   }
 
-  /**
-   * Gets the receiver UUID from a conversation given the sender UUID.
-   * Conversations store users as userOneId and userTwoId (normalized).
-   */
-  private async getReceiverUuid(
-    conversationId: string,
-    senderUuid: string,
-  ): Promise<string> {
-    const conversation = await this.conversationService.findById(conversationId);
-
-    if (!conversation) {
-      this.logger.warn(
-        `Conversation not found conversationId=${conversationId}`,
-      );
-      throw new Error('Conversation not found');
-    }
-
-    return conversation.userOneId === senderUuid
-      ? conversation.userTwoId
-      : conversation.userOneId;
+  private wsError(code: string, message: string) {
+    return { success: false, error: { code, message } };
   }
 }
