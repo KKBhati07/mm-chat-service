@@ -13,8 +13,11 @@ import { CoreModule } from './core/core.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: './env/.env',
+      envFilePath: 'src/env/.env',
       validationSchema: envValidationSchema,
+      validationOptions: {
+        abortEarly: false,
+      },
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],

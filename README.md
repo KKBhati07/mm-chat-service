@@ -122,12 +122,23 @@ io(CHAT_WS_URL, {
 
 ## ⚙️ Configuration
 
-| Variable | Description | Default (in code) |
-|----------|-------------|-------------------|
-| `PORT` | HTTP(S) server port | `4400` |
-| `ALLOWED_APP_ORIGINS` | Comma-separated CORS origins for Socket.IO / HTTP | `https://marketmate.local:4200`, `https://admin.marketmate.local:4300`, `http://localhost:4200`, `http://localhost:4300` |
+Environment variables are loaded from `src/env/.env` and validated at startup (see `src/config/env.validation.ts` and `src/env/.env.example`).
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `JWT_SECRET` | Yes | Must match SpringMate JWT secret |
+| `AUTH_RESOLVE_URL` | Yes* | Full URL to SpringMate internal session resolve endpoint |
+| `SPRING_INTERNAL_SERVICE_KEY` | Yes | Must match SpringMate `SERVICE_KEY`; **no hardcoded fallback** |
+| `REDIS_HOST` | Yes | Redis host for session cache |
+| `DB_*` | Yes | PostgreSQL connection (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`) |
+| `PORT` | No | HTTP(S) server port (default `3000`) |
+| `ALLOWED_APP_ORIGINS` | No | Comma-separated CORS origins for Socket.IO / HTTP |
+
+\*Or `SPRING_BASE_URL` (legacy alias for the resolve URL).
 
 The service runs over **HTTPS**. Certificate paths are set in code (`/certs/`). For local development, see `certs/README.md`.
+
+Full details: `docs/ARCHITECTURE.md` → Runtime Configuration.
 
 ---
 

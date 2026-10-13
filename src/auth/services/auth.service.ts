@@ -1,9 +1,4 @@
-import {
-  Inject,
-  Injectable,
-  InternalServerErrorException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
@@ -109,28 +104,13 @@ export class AuthService {
       'Calling Spring Auth service internal endpoint to resolve session',
     );
 
-    // Construct URL from Spring base URL + internal endpoint path
     const url =
-      this.configService.get<string>('SPRING_BASE_URL') ||
-      this.configService.get<string>('AUTH_RESOLVE_URL');
+      this.configService.get<string>('AUTH_RESOLVE_URL') ??
+      this.configService.getOrThrow<string>('SPRING_BASE_URL');
 
-    if (!url){
-      this.logger.error('Unable to Authenticate. Auth Url not found!');
-      throw new InternalServerErrorException(
-        'Unable to Authenticate. Auth Url not found!',
-      );
-    }
-
-    // Get service key for internal endpoint authentication
-    const serviceKey =
-      this.configService.get<string>('SPRING_INTERNAL_SERVICE_KEY') ||
-      this.configService.get<string>('INTERNAL_SERVICE_KEY') ||
-      '6911aa62-3705-42ef-8484-db35b62cf9ba';
-
-    if (!serviceKey) {
-      this.logger.error('Internal service key not configured');
-      throw new UnauthorizedException('Service configuration error');
-    }
+    const serviceKey = this.configService.getOrThrow<string>(
+      'SPRING_INTERNAL_SERVICE_KEY',
+    );
 
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 10000);
